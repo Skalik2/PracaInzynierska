@@ -1,0 +1,17 @@
+# Użyj oficjalnego obrazu Python
+FROM python:3.10-slim
+
+# Ustaw katalog roboczy
+WORKDIR /usr/src/app
+
+# Skopiuj plik zależności
+COPY requirements.txt ./
+
+# Zainstaluj zależności
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Skopiuj resztę kodu aplikacji
+COPY . .
+
+# Uruchom aplikację
+CMD ["python", "main.py"]

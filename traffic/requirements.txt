@@ -1,0 +1,9 @@
+aiohttp
+SQLAlchemy
+psycopg2-binary
+python-dotenv
+psutil
+xgboost
+numpy
+joblib
+scikit-learn

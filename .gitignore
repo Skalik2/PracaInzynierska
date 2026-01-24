@@ -1,0 +1,15 @@
+logdatabase_dump.sql
+node_modules
+.env
+Tests/analysisResults
+Tests/csv_output
+Tests/ipynb
+Tests/main
+Tests/venv
+Tests/logs
+Tests/models/weights
+Tests/models/behavioral_analysis
+Tests/models/analysisResults
+traffic/*.pkl
+traffic/*.json
+ReadyTests/

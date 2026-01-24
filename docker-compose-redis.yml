@@ -1,0 +1,267 @@
+services:
+  database:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: "gielda"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "Password"
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gielda"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gielda_network
+
+  logdatabase:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Password
+      POSTGRES_DB: gielda
+    ports:
+      - "5433:5432"
+    volumes:
+      - log_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gielda_network
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - gielda_network
+
+  bot_guard:
+    build:
+      context: ./traffic
+      dockerfile: Dockerfile.traffic
+    command: ["python", "bot_guard.py"]
+    expose:
+      - "5000"
+    environment:
+      MODEL_PATH: "bot_request_model.json"
+    depends_on:
+      market_service:
+        condition: service_healthy
+    networks:
+      - gielda_network
+
+  # SCALONY SERWIS (dawniej market_service + gielda_service)
+  market_service:
+    build:
+      context: ./gielda
+      dockerfile: Dockerfile.gielda
+    depends_on:
+      database:
+        condition: service_healthy
+      logdatabase:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      SERVICE_TYPE: "MARKET"
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+      REDIS_HOST: redis
+      BOT_GUARD_URL: http://bot_guard:5000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/user/allusers || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gielda_network
+
+  trade_service_1:
+    build:
+      context: ./gielda
+      dockerfile: Dockerfile.trade
+    depends_on:
+      market_service:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SERVICE_TYPE: "TRADE"
+      TRADE_ID: 1
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+      COMPANIES_IDS: "1,2"
+      NUM_OF_CACHE: 500
+      CACHE_TIME: 4
+      TRANSACTION_TIME: 100
+      REDIS_HOST: redis
+    networks:
+      - gielda_network
+
+  trade_service_2:
+    build:
+      context: ./gielda
+      dockerfile: Dockerfile.trade
+    depends_on:
+      market_service:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SERVICE_TYPE: "TRADE"
+      TRADE_ID: 2
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+      COMPANIES_IDS: "3,4"
+      NUM_OF_CACHE: 500
+      CACHE_TIME: 4
+      TRANSACTION_TIME: 100
+      REDIS_HOST: redis
+    networks:
+      - gielda_network
+
+  trade_service_3:
+    build:
+      context: ./gielda
+      dockerfile: Dockerfile.trade
+    depends_on:
+      market_service:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SERVICE_TYPE: "TRADE"
+      TRADE_ID: 3
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+      COMPANIES_IDS: "5,6"
+      NUM_OF_CACHE: 500
+      CACHE_TIME: 4
+      TRANSACTION_TIME: 100
+      REDIS_HOST: redis
+    networks:
+      - gielda_network
+
+  trade_service_4:
+    build:
+      context: ./gielda
+      dockerfile: Dockerfile.trade
+    depends_on:
+      market_service:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SERVICE_TYPE: "TRADE"
+      TRADE_ID: 4
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+      COMPANIES_IDS: "7,8"
+      NUM_OF_CACHE: 500
+      CACHE_TIME: 4
+      TRANSACTION_TIME: 100
+      REDIS_HOST: redis
+    networks:
+      - gielda_network
+
+  trade_service_5:
+    build:
+      context: ./gielda
+      dockerfile: Dockerfile.trade
+    depends_on:
+      market_service:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SERVICE_TYPE: "TRADE"
+      TRADE_ID: 5
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+      COMPANIES_IDS: "9,10"
+      NUM_OF_CACHE: 500
+      CACHE_TIME: 4
+      TRANSACTION_TIME: 100
+      REDIS_HOST: redis
+    networks:
+      - gielda_network
+
+  traffic_service:
+    build:
+      context: ./traffic
+      dockerfile: Dockerfile.traffic
+    depends_on:
+      market_service:
+        condition: service_healthy
+    environment:
+      NUM_USERS: ${NUM_USERS:-200}
+      PCT_CAUTIOUS: ${PCT_CAUTIOUS:-0.50}
+      PCT_ACTIVE: ${PCT_ACTIVE:-0.45}
+      PCT_BOT: ${PCT_BOT:-0.05}
+      TRAFFIC_TIME_REQUEST: 500
+      SIMULATION_DURATION: ${SIMULATION_DURATION:-3600}
+      NUM_COMPANIES: "10"
+      DB_TYPE: "postgres"
+      DB_HOST: database
+      DB_USERNAME: "postgres"
+      DB_PASSWORD: "Password"
+      DB_NAME: "gielda"
+      DB_HOST2: logdatabase
+      DB_PORT2: 5432
+    ports:
+      - "3001:3001"
+    networks:
+      - gielda_network
+
+volumes:
+  db_data:
+  log_db_data:
+
+networks:
+  gielda_network:
+    driver: bridge
