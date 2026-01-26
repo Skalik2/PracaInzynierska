@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from sklearn.covariance import EllipticEnvelope
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import train_test_split
 import joblib
 import os
 import argparse
@@ -11,49 +13,71 @@ def train_gaussian(input_file, model_output):
         print(f"Błąd: Nie znaleziono pliku {input_file}")
         return
 
+    print("Wczytywanie danych...")
     df = pd.read_csv(input_file, on_bad_lines='skip', low_memory=False)
     
     df['is_bot'] = df['userPersona'].astype(str).apply(lambda x: 1 if 'SCRAPER_BOT' in x else 0)
     
     feature_cols = [
-        'apiTime', 
-        'applicationTime', 
-        'databaseTime', 
-        'cpuUsage_market',    
-        'cpuUsage_trade',     
-        'memoryUsage_trade',  
-        'memoryUsage_market', 
-        'endpointUrl', 
-        'apiMethod'
+        'apiTime', 'applicationTime', 'databaseTime', 
+        'cpuUsage_market', 'cpuUsage_trade', 
+        'memoryUsage_trade', 'memoryUsage_market', 
+        'endpointUrl', 'apiMethod'
     ]
     
     for col in feature_cols:
         if col not in df.columns:
-            print(f"Ostrzeżenie: Brak kolumny '{col}' w danych. Wypełnianie zerami.")
             df[col] = 0
     
-    df_model = df[feature_cols].copy().fillna(0)
+    df_data = df[feature_cols + ['is_bot']].copy()
     
-    url_counts = df_model['endpointUrl'].value_counts()
-    df_model['endpointUrl'] = df_model['endpointUrl'].map(url_counts).fillna(0)
+    num_cols = df_data.select_dtypes(include=[np.number]).columns
+    df_data[num_cols] = df_data[num_cols].fillna(0)
+        
+    df_humans = df_data[df_data['is_bot'] == 0].copy()
+    df_bots = df_data[df_data['is_bot'] == 1].copy()
 
-    df_model = pd.get_dummies(df_model, columns=['apiMethod'], prefix='method')
-    
-    df_model = df_model.astype(float)
+    train_df, X_test_human = train_test_split(df_humans, test_size=0.2, random_state=42)
 
-    X_train = df_model[df['is_bot'] == 0]
+    test_df = pd.concat([X_test_human, df_bots], axis=0).sample(frac=1, random_state=42)
     
-    X_test = df_model
-    y_test_true = df['is_bot']
+    y_test_true = test_df['is_bot']
+
+    print(f"Trening na {len(train_df)} próbkach ACTIVE_USER i CAUTIOUS_USER.")
+    print(f"Testowanie na {len(test_df)} próbkach ACTIVE_USER i CAUTIOUS_USER + SCRAPER_BOT.")
+    
+    url_counts = train_df['endpointUrl'].value_counts()
+    
+    def map_frequency(data_series, counts):
+        return data_series.map(counts).fillna(0)
+
+    train_df['endpointUrl'] = map_frequency(train_df['endpointUrl'], url_counts)
+    test_df['endpointUrl'] = map_frequency(test_df['endpointUrl'], url_counts)
+
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    ohe.fit(train_df[['apiMethod']])
+    
+    train_encoded = ohe.transform(train_df[['apiMethod']])
+    test_encoded = ohe.transform(test_df[['apiMethod']])
+    
+    encoded_cols = ohe.get_feature_names_out(['apiMethod'])
+    
+    train_encoded_df = pd.DataFrame(train_encoded, columns=encoded_cols, index=train_df.index)
+    test_encoded_df = pd.DataFrame(test_encoded, columns=encoded_cols, index=test_df.index)
+    
+    drop_cols = ['apiMethod', 'is_bot']
+    
+    X_train = pd.concat([train_df.drop(columns=drop_cols), train_encoded_df], axis=1)
+    X_test = pd.concat([test_df.drop(columns=drop_cols), test_encoded_df], axis=1)
+    
+    X_train = X_train.astype(float)
+    X_test = X_test.astype(float)
 
     train_columns = X_train.columns.tolist()
-
-    print(f"Trening na {len(X_train)} próbkach (sami ludzie).")
-    print(f"Testowanie na {len(X_test)} próbkach.")
     print(f"Liczba cech po transformacji: {len(train_columns)}")
-
+    
     clf = EllipticEnvelope(
-        contamination=0.01, 
+        contamination=0.01,
         random_state=42,
         support_fraction=0.9
     )
@@ -61,15 +85,16 @@ def train_gaussian(input_file, model_output):
     clf.fit(X_train)
 
     y_pred_raw = clf.predict(X_test)
+    
     y_pred = [1 if x == -1 else 0 for x in y_pred_raw]
 
-    print("\nWyniki")
+    print("\nWyniki na zbiorze TESTOWYM:")
     cm = confusion_matrix(y_test_true, y_pred)
     
     try:
         tn, fp, fn, tp = cm.ravel()
         print(f"TP (Bot wykryty): {tp}")
-        print(f"FP (User zablokowany): {fp}")
+        print(f"FP (User zablokowany - False Alarm): {fp}")
         print(f"TN (User wpuszczony): {tn}")
         print(f"FN (Bot wpuszczony): {fn}")
     except ValueError:
@@ -79,13 +104,13 @@ def train_gaussian(input_file, model_output):
     print(classification_report(y_test_true, y_pred, target_names=['Human', 'Bot']))
 
     save_path = model_output
-    
     if os.path.exists('weights'):
         save_path = os.path.join('weights', model_output)
     
     save_data = {
         'model': clf,
         'url_counts': url_counts,
+        'ohe_encoder': ohe,
         'train_columns': train_columns
     }
 
@@ -98,6 +123,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     input_path = f'../{args.dir}/merged_data.csv'
-    output_path = f'bot_gaussian_model{args.dir}.pkl'
+    output_path = f'bot_gaussian_model_{args.dir}.pkl'
 
+    print(f"Uruchamianie dla katalogu: {args.dir}")
     train_gaussian(input_path, output_path)

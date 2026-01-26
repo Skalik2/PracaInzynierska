@@ -112,8 +112,17 @@ def draw_persona_metrics(complete_market_log, output_dir):
     
     plt.figure(figsize=(14, 7))
     sns.lineplot(data=df_count, x='timestamp', y='count', hue='userPersona', marker='o')
-    plt.title('Natężenie ruchu (Liczba zapytań/min) wg klasy użytkownika')
-    plt.ylabel('Liczba zapytań')
+    
+    plt.title('Natężenie ruchu (Liczba zapytań/min) wg klasy użytkownika', fontsize=20, fontweight='bold')
+    
+    plt.ylabel('Liczba zapytań', fontsize=16)
+    
+    plt.xticks(fontsize=14, rotation=45) 
+    plt.yticks(fontsize=14)
+    
+    plt.legend(title='Klasa użytkownika', fontsize=14, title_fontsize=16)
+    
+    plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'persona_traffic_load.png'))
     plt.close()
 
@@ -180,10 +189,16 @@ def draw_average_response_time(complete_market_log, output_dir):
         
         plt.figure(figsize=(14, 8))
         sns.barplot(x='endpointUrl', y='apiTime', hue='userPersona', data=agg_data)
-        plt.title('Średni czas odpowiedzi API dla Endpoint\'u i Klasy użytkownika')
-        plt.ylabel('Średni czas (ms)')
-        plt.xticks(rotation=45, ha='right')
-        plt.legend(title='Klasa użytkownika')
+        
+        plt.title('Średni czas odpowiedzi API dla Endpoint\'u i Klasy użytkownika', fontsize=20, fontweight='bold')
+        
+        plt.ylabel('Średni czas (ms)', fontsize=16)
+        
+        plt.xticks(rotation=45, ha='right', fontsize=14)
+        plt.yticks(fontsize=14)
+        
+        plt.legend(title='Klasa użytkownika', fontsize=14, title_fontsize=16)
+        
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, 'avg_response_time_persona.png'))
         plt.close()

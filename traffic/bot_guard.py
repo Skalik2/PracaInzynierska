@@ -3,6 +3,7 @@ import xgboost as xgb
 import numpy as np
 import joblib
 import asyncio
+import pandas as pd
 from dotenv import load_dotenv
 
 from system_monitor import get_system_usage
@@ -11,14 +12,17 @@ from db_logging import log_cpu_mem, log_bot_stats
 load_dotenv()
 
 model = xgb.Booster()
-model.load_model("bot_request_modelH1U200-45-45-10.json")
-encoders = joblib.load("bot_request_encodersH1U200-45-45-10.pkl")
+model.load_model("bot_xgboost_model_H1U200-45-45-10.json")
 
-BOT_THRESHOLD = 0.99 
+encoders_data = joblib.load("bot_xgboost_encoders_H1U200-45-45-10.pkl")
+url_counts = encoders_data['url_counts']
+ohe_encoder = encoders_data['ohe_encoder']
+
+BOT_THRESHOLD = 0.45
 
 stats_lock = asyncio.Lock()
 seen_users = set()
-blocked_users = set() 
+blocked_users = set()
 
 system_state = {
     'MARKET': {'cpu': 10.0, 'mem': 30.0},
@@ -29,16 +33,19 @@ async def predict(request):
     data = await request.json()
     
     user_id = data.get('userId')
-
     raw_url = data.get('endpointUrl', '')
     raw_method = data.get('apiMethod', '')
-    
-    try:
-        method_enc = encoders['apiMethod'].transform([raw_method])[0]
-        url_enc = encoders['endpointUrl'].transform([raw_url])[0]
-    except Exception:
-        method_enc = 0
+
+    if raw_url in url_counts.index:
+        url_enc = url_counts[raw_url]
+    else:
         url_enc = 0
+
+    try:
+        input_df = pd.DataFrame([[raw_method]], columns=['apiMethod'])
+        method_enc_vector = ohe_encoder.transform(input_df)[0]
+    except Exception:
+        method_enc_vector = np.zeros(len(ohe_encoder.categories_[0]))
 
     incoming_cpu = data.get('cpuUsage', 0)
     incoming_mem = data.get('memoryUsage', 0)
@@ -60,9 +67,7 @@ async def predict(request):
     mem_market = system_state['MARKET']['mem']
     mem_trade  = system_state['TRADE']['mem']
 
-    print(f"Czas api: {data.get('apiTime', 0)}, applicationTime: {data.get('applicationTime', 0)}, databaseTime: {data.get('databaseTime', 0)}")
-
-    features = np.array([[
+    base_features = [
         data.get('apiTime', 0),
         data.get('applicationTime', 0),
         data.get('databaseTime', 0),
@@ -70,18 +75,23 @@ async def predict(request):
         cpu_trade,
         mem_trade,
         mem_market,
-        url_enc,
-        method_enc
-    ]])
-    
-    feature_names = [
+        url_enc
+    ]
+
+    final_features = np.concatenate([base_features, method_enc_vector])
+    features_matrix = np.array([final_features])
+
+    base_names = [
         'apiTime', 'applicationTime', 'databaseTime', 
         'cpuUsage_market', 'cpuUsage_trade', 
         'memoryUsage_trade', 'memoryUsage_market', 
-        'endpointUrl', 'apiMethod'
+        'endpointUrl'
     ]
+    method_names = list(ohe_encoder.get_feature_names_out(['apiMethod']))
+    
+    full_feature_names = base_names + method_names
 
-    dmatrix = xgb.DMatrix(features, feature_names=feature_names)
+    dmatrix = xgb.DMatrix(features_matrix, feature_names=full_feature_names)
     prediction = model.predict(dmatrix)[0]
     
     is_bot = prediction > BOT_THRESHOLD
@@ -111,7 +121,6 @@ async def predict(request):
 
     return web.json_response({'is_bot': bool(is_bot), 'score': float(prediction)})
 
-
 async def monitor_system(app):
     try:
         while True:
@@ -132,7 +141,6 @@ async def start_background_tasks(app):
 async def cleanup_background_tasks(app):
     app['monitor_task'].cancel()
     await app['monitor_task']
-
 
 app = web.Application()
 app.add_routes([web.post('/predict', predict)])
