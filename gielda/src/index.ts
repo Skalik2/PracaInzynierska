@@ -13,7 +13,7 @@ app.use(express.json());
 dotenv.config({ path: `${process.cwd()}/./.env` });
 const PORT = process.env.APP_PORT || 3000;
 
-// TO ZMIANA
+//
 app.use(securityMiddleware);
 APPROUTER.forEach(({ path, router }) => app.use(`/api/${path}`, router));
 
@@ -21,22 +21,18 @@ app.use(globalErrorHandler);
 
 async function startServer() {
   try {
-    // Inicjalizacja bazy logów po zakończeniu inicjalizacji głównej bazy
     await initializeLogDatabase();
     console.log("Log database initialized");
 
-    // Inicjalizacja głównej bazy danych
     await initializeDatabase();
     console.log("Main database initialized");
 
-    // Gdy obie bazy zostaną zainicjalizowane, uruchom serwer
     app.listen(PORT, () => {
       console.log("Server is running on http://localhost:" + PORT);
     });
 
-    // Co 5 sekund twórz logi
     setInterval(async () => {
-      await createStockLog(); // Zakładam, że createStockLog zapisuje logi do bazy logów
+      await createStockLog();
     }, 5000);
   } catch (error) {
     console.error("Error during initialization:", error);

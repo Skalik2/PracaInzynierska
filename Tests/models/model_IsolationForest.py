@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import OneHotEncoder  # <-- Dodano import
 from sklearn.metrics import classification_report, confusion_matrix
 import joblib
 import os
@@ -36,7 +37,14 @@ def train_occ(input_file, model_output):
     url_counts = df_model['endpointUrl'].value_counts()
     df_model['endpointUrl'] = df_model['endpointUrl'].map(url_counts).fillna(0)
     
-    df_model = pd.get_dummies(df_model, columns=['apiMethod'], prefix='method')
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    
+    encoded_matrix = ohe.fit_transform(df_model[['apiMethod']])
+    encoded_cols = ohe.get_feature_names_out(['apiMethod'])
+    
+    encoded_df = pd.DataFrame(encoded_matrix, columns=encoded_cols, index=df_model.index)
+    
+    df_model = pd.concat([df_model.drop(columns=['apiMethod']), encoded_df], axis=1)
     
     df_model = df_model.astype(float)
 
@@ -60,7 +68,6 @@ def train_occ(input_file, model_output):
     clf.fit(X_train)
 
     y_pred_raw = clf.predict(X_test)
-    
     y_pred = [1 if x == -1 else 0 for x in y_pred_raw]
 
     print("\nWyniki")
@@ -79,6 +86,7 @@ def train_occ(input_file, model_output):
     save_data = {
         'model': clf,
         'url_counts': url_counts,
+        'ohe_encoder': ohe,
         'train_columns': train_columns
     }
     

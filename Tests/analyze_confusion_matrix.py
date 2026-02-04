@@ -36,7 +36,7 @@ def load_data(directory):
                 dfs[key] = df
                 print(f"✅ Wczytano {filename}: {len(df)} wierszy")
             except Exception as e:
-                print(e)
+                print(f"Błąd wczytywania {filename}: {e}")
         else:
             pass
     
@@ -126,13 +126,18 @@ def analyze_confusion_over_time(dfs, user_labels, time_freq='1s'):
                 allowed_resampled = df.set_index('timestamp').resample(time_freq)[['FN', 'TN']].sum()
 
     if blocked_resampled.empty and allowed_resampled.empty:
+        print("Brak danych do analizy confusion matrix (obie grupy puste).")
         return None
 
     result = pd.concat([blocked_resampled, allowed_resampled], axis=1).fillna(0)
     
-    result['Precision'] = result['TP'] / (result['TP'] + result['FP'])
-    result['Recall'] = result['TP'] / (result['TP'] + result['FN'])
-    result['F1'] = 2 * (result['Precision'] * result['Recall']) / (result['Precision'] + result['Recall'])
+    for col in ['TP', 'FP', 'FN', 'TN']:
+        if col not in result.columns:
+            result[col] = 0.0
+
+    result['Precision'] = result['TP'] / (result['TP'] + result['FP'] + 1e-9)
+    result['Recall'] = result['TP'] / (result['TP'] + result['FN'] + 1e-9)
+    result['F1'] = 2 * (result['Precision'] * result['Recall']) / (result['Precision'] + result['Recall'] + 1e-9)
     
     return result.fillna(0)
 
@@ -195,7 +200,7 @@ def main():
         plot_confusion_timeline(result, out_dir)
         generate_report(result, out_dir)
     else:
-        pass
+        print("Nie wygenerowano wyników (pusty DataFrame).")
 
 if __name__ == "__main__":
     main()

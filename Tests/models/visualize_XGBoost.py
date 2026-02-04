@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
 import xgboost as xgb
@@ -10,10 +10,10 @@ import joblib
 import os
 import sys
 
-INPUT_FILE = '../H1U10-50-40-10/merged_data.csv'
-MODEL_FILE = './weights/bot_request_modelH1U10-50-40-10.json'
-ENCODERS_FILE = './weights/bot_request_encodersH1U10-50-40-10.pkl'
-OUTPUT_DIR = '../H1U10-50-40-10/visualizations'
+INPUT_FILE = '../M2U200-45-45-10/merged_data.csv'
+MODEL_FILE = './weights/bot_xgboost_model_M2U200-45-45-10.json'
+ENCODERS_FILE = './weights/bot_xgboost_encoders_M2U200-45-45-10.pkl'
+OUTPUT_DIR = '../M2U200-45-45-10/visualizations'
 OUTPUT_IMAGE = 'XGBoost_Boundary_Full.png'
 OUTPUT_TXT = OUTPUT_IMAGE.replace('.png', '_Stats.txt')
 
@@ -40,7 +40,7 @@ def load_data():
         if col not in df.columns:
             df[col] = 0
 
-    df_model = df[feature_cols].copy().fillna(0)
+    df_model = df[feature_cols].copy() 
 
     if len(df_model) > SAMPLE_SIZE:
         print(f"   Losowanie {SAMPLE_SIZE} wierszy do wizualizacji")
@@ -50,30 +50,44 @@ def load_data():
     else:
         y_true = df['is_bot']
 
+    num_cols = df_model.select_dtypes(include=[np.number]).columns
+    df_model[num_cols] = df_model[num_cols].fillna(0)
+
     return df_model, y_true
 
-def apply_encoders(X_df):
+def prepare_features(df_input):
     if not os.path.exists(ENCODERS_FILE):
-        print(f"BŁĄD: Brak pliku {ENCODERS_FILE}")
+        print(f"BŁĄD: Brak pliku encoderów {ENCODERS_FILE}")
         sys.exit(1)
 
-    encoders = joblib.load(ENCODERS_FILE)
+    print(f"Wczytywanie encoderów z: {ENCODERS_FILE}")
+    encoders_data = joblib.load(ENCODERS_FILE)
     
-    for col in ['endpointUrl', 'apiMethod']:
-        le = encoders.get(col)
-        if le:
-            X_df[col] = X_df[col].astype(str).apply(lambda x: le.transform([x])[0] if x in le.classes_ else 0)
-        else:
-            temp_le = LabelEncoder()
-            X_df[col] = temp_le.fit_transform(X_df[col].astype(str))
-            
-    return X_df
+    url_counts = encoders_data['url_counts']
+    ohe_encoder = encoders_data['ohe_encoder']
+    
+    df_processed = df_input.copy()
+
+    df_processed['endpointUrl'] = df_processed['endpointUrl'].map(url_counts).fillna(0)
+
+    encoded_matrix = ohe_encoder.transform(df_processed[['apiMethod']])
+    encoded_cols = ohe_encoder.get_feature_names_out(['apiMethod'])
+    
+    encoded_df = pd.DataFrame(encoded_matrix, columns=encoded_cols, index=df_processed.index)
+    
+    X_final = pd.concat([df_processed.drop(columns=['apiMethod']), encoded_df], axis=1)
+    
+    X_final = X_final.astype(float)
+    
+    print(f"Liczba cech po transformacji: {X_final.shape[1]}")
+    return X_final
 
 def load_xgboost_model():
     if not os.path.exists(MODEL_FILE):
         print(f"BŁĄD: Brak modelu {MODEL_FILE}")
         sys.exit(1)
         
+    print(f"Wczytywanie modelu z: {MODEL_FILE}")
     model = xgb.XGBClassifier()
     model.load_model(MODEL_FILE)
     return model
@@ -99,7 +113,7 @@ def visualize(X, y_true, model):
     sorted_loadings = loadings.sort_values(by='PC1', ascending=False)
     
     report_lines = []
-    report_lines.append(f"RAPORT ANALIZY PCA I MODELU")
+    report_lines.append(f"RAPORT ANALIZY PCA I MODELU (XGBoost)")
     report_lines.append(f"Plik danych: {INPUT_FILE}")
     report_lines.append(f"Liczba próbek: {len(y_true)}")
     report_lines.append("-" * 40)
@@ -111,17 +125,15 @@ def visualize(X, y_true, model):
     report_lines.append(f"  TN (Poprawny user): {tn}")
     report_lines.append(f"  FN (Bot niewykryty): {fn}")
     report_lines.append("-" * 40)
-    report_lines.append(f"ANALIZA PCA (Co oznaczają osie?):")
+    report_lines.append(f"ANALIZA PCA:")
     report_lines.append(f"Wyjaśniona wariancja PC1: {pca.explained_variance_ratio_[0]:.2%}")
     report_lines.append(f"Wyjaśniona wariancja PC2: {pca.explained_variance_ratio_[1]:.2%}")
-    report_lines.append("\nTABELA WPŁYWU CECH:")
-    report_lines.append("(Dodatnie wartości ciągną punkt w prawo/górę, ujemne w lewo/dół)")
-    report_lines.append("-" * 40)
-    report_lines.append(sorted_loadings.to_string())
-    report_lines.append("-" * 40)
+    report_lines.append("\nTOP 10 Cech wpływających na PC1 (oś X):")
+    report_lines.append(sorted_loadings.head(5).to_string())
+    report_lines.append("...")
+    report_lines.append(sorted_loadings.tail(5).to_string())
 
     report_content = "\n".join(report_lines)
-
     print(report_content)
 
     if not os.path.exists(OUTPUT_DIR):
@@ -173,6 +185,6 @@ def visualize(X, y_true, model):
 
 if __name__ == "__main__":
     X_raw, y_true = load_data()
-    X_encoded = apply_encoders(X_raw)
+    X_prepared = prepare_features(X_raw)
     xgb_model = load_xgboost_model()
-    visualize(X_encoded, y_true, xgb_model)
+    visualize(X_prepared, y_true, xgb_model)

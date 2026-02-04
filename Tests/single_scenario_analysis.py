@@ -34,12 +34,12 @@ def load_data(directory):
             try:
                 df = pd.read_csv(filepath, na_values=['\\N'])
                 if 'timestamp' in df.columns:
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed').astype('datetime64[ns]')
                     df = df.sort_values('timestamp')
                 data[key] = df
                 print(f"Załadowano: {filename}")
             except Exception as e:
-                print(e)
+                print(f"Błąd wczytywania {filename}: {e}")
         else:
             missing_files.append(filename)
 
@@ -152,6 +152,7 @@ def draw_offers_and_cpu(trade_log, trade_cpu, market_cpu, output_dir):
 
         t_cpu_renamed = t_cpu.copy().rename(columns={'cpuUsage': 'cpuUsage_trade'})
 
+        # Dzięki wymuszeniu .astype('datetime64[ns]') w load_data, ten merge teraz zadziała
         merged_step1 = pd.merge_asof(t_log, t_cpu_renamed, on='timestamp', direction='nearest')
         
         merged_data = pd.merge_asof(merged_step1, m_cpu_ready, on='timestamp', direction='nearest')

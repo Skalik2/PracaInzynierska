@@ -2,16 +2,16 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
 import joblib
 import os
 import sys
 
-INPUT_FILE = '../H1U200-45-45-10/merged_data.csv'
-MODEL_FILE = './weights/bot_ocsvm_modelH1U200-45-45-10.pkl' 
-OUTPUT_DIR = '../H1U200-45-45-10/visualizations'
+INPUT_FILE = '../M2U200-45-45-10/merged_data.csv'
+MODEL_FILE = './weights/bot_ocsvm_model_M2U200-45-45-10.pkl' 
+OUTPUT_DIR = '../M2U200-45-45-10/visualizations'
 OUTPUT_IMAGE = 'OCSVM_Boundary_Full.png'
 LOG_FILE = OUTPUT_IMAGE.replace('.png', '_ConsoleLog.txt')
 
@@ -51,7 +51,7 @@ def load_data():
         if col not in df.columns:
             df[col] = 0
 
-    df_model = df[feature_cols].copy().fillna(0)
+    df_model = df[feature_cols].copy()
 
     if len(df_model) > SAMPLE_SIZE:
         print(f"   Losowanie {SAMPLE_SIZE} wierszy do wizualizacji")
@@ -60,39 +60,47 @@ def load_data():
         y_true = df.loc[indices, 'is_bot']
     else:
         y_true = df['is_bot']
+        
+    num_cols = df_model.select_dtypes(include=[np.number]).columns
+    df_model[num_cols] = df_model[num_cols].fillna(0)
 
     return df_model, y_true
 
-def load_model_and_apply_encoders(X_df):
+def load_model_and_prepare_features(X_df):
     if not os.path.exists(MODEL_FILE):
-        local_model_path = os.path.basename(MODEL_FILE)
-        if os.path.exists(local_model_path):
-            print(f"   Znaleziono model w bieżącym katalogu: {local_model_path}")
-            model_path_to_use = local_model_path
-        else:
-            print(f"BŁĄD: Brak modelu {MODEL_FILE} (ani {local_model_path}). Uruchom najpierw detect_bot_ocsvm.py")
-            sys.exit(1)
-    else:
-        model_path_to_use = MODEL_FILE
+        print(f"BŁĄD: Brak modelu {MODEL_FILE}. Uruchom najpierw model_OC-SVM.py")
+        sys.exit(1)
 
-    data_pack = joblib.load(model_path_to_use)
+    print(f"Wczytywanie modelu z: {MODEL_FILE}")
+    data_pack = joblib.load(MODEL_FILE)
     
-    model = data_pack['model']
-    encoders = data_pack['encoders']
+    pipeline = data_pack.get('pipeline')
+    if pipeline is None:
+        pipeline = data_pack.get('model')
 
-    for col in ['endpointUrl', 'apiMethod']:
-        le = encoders.get(col)
-        if le:
-            X_df[col] = X_df[col].astype(str).apply(lambda x: le.transform([x])[0] if x in le.classes_ else 0)
-        else:
-            temp_le = LabelEncoder()
-            X_df[col] = temp_le.fit_transform(X_df[col].astype(str))
+    url_counts = data_pack['url_counts']
+    ohe_encoder = data_pack['ohe_encoder']
+
+    df_processed = X_df.copy()
+    
+    df_processed['url_rarity'] = df_processed['endpointUrl'].map(url_counts).fillna(0)
+    
+    encoded_matrix = ohe_encoder.transform(df_processed[['apiMethod']])
+    encoded_cols = ohe_encoder.get_feature_names_out(['apiMethod'])
+    encoded_df = pd.DataFrame(encoded_matrix, columns=encoded_cols, index=df_processed.index)
+    
+    drop_cols = ['apiMethod', 'endpointUrl']
+    X_final = pd.concat([df_processed.drop(columns=drop_cols), encoded_df], axis=1)
+    
+    X_final = X_final.astype(float)
+    
+    print(f"Liczba cech po transformacji: {X_final.shape[1]}")
             
-    return X_df, model
+    return X_final, pipeline
 
-def visualize(X, y_true, model):
-
-    y_pred_raw = model.predict(X)
+def visualize(X, y_true, pipeline):
+    
+    y_pred_raw = pipeline.predict(X)
     
     y_pred = np.where(y_pred_raw == -1, 1, 0)
     
@@ -101,6 +109,7 @@ def visualize(X, y_true, model):
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+    
     pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_scaled)
 
@@ -115,11 +124,10 @@ def visualize(X, y_true, model):
     print(f"ANALIZA PCA:")
     print(f"  Wyjaśniona wariancja PC1 (Oś X): {pca.explained_variance_ratio_[0]:.2%}")
     print(f"  Wyjaśniona wariancja PC2 (Oś Y): {pca.explained_variance_ratio_[1]:.2%}")
-    print(f"  RAZEM: {sum(pca.explained_variance_ratio_):.2%} informacji z {X.shape[1]} cech.")
     
     loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=X.columns)
-    print("\nTABELA WPŁYWU CECH:")
-    print(loadings.sort_values(by='PC1', ascending=False).to_string())
+    print("\nTOP 5 cech wpływających na PC1:")
+    print(loadings.sort_values(by='PC1', ascending=False).head(5).to_string())
 
     boundary_model = KNeighborsClassifier(n_neighbors=15, weights='distance')
     boundary_model.fit(X_pca, y_pred) 
@@ -148,10 +156,8 @@ def visualize(X, y_true, model):
                     linewidth=2, label='Błędna klasyfikacja')
 
     plt.title(f'Granice decyzyjne One-Class SVM (PCA)', fontsize=16)
-    
     plt.xlabel(f'PC 1 ({pca.explained_variance_ratio_[0]:.1%} var)', fontsize=12)
     plt.ylabel(f'PC 2 ({pca.explained_variance_ratio_[1]:.1%} var)', fontsize=12)
-    
     plt.legend(loc='upper right', frameon=True, framealpha=0.9)
     plt.grid(True, alpha=0.3)
     
@@ -169,7 +175,9 @@ if __name__ == "__main__":
 
     try:
         X_raw, y_true = load_data()
-        X_encoded, ocsvm_model = load_model_and_apply_encoders(X_raw)
-        visualize(X_encoded, y_true, ocsvm_model)
+        X_prepared, pipeline = load_model_and_prepare_features(X_raw)
+        visualize(X_prepared, y_true, pipeline)
     except Exception as e:
-        print(f"\nWystąpił błąd: {e}")
+        import traceback
+        traceback.print_exc()
+        print(e)

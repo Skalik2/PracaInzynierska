@@ -2,16 +2,16 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
 import joblib
 import os
 import sys
 
-INPUT_FILE = '../H1U10-50-40-10/merged_data.csv' 
-MODEL_FILE = './weights/bot_gaussian_modelH1U10-50-40-10.pkl'
-OUTPUT_DIR = '../H1U10-50-40-10/visualizations'
+INPUT_FILE = '../M2U200-45-45-10/merged_data.csv' 
+MODEL_FILE = './weights/bot_gaussian_model_M2U200-45-45-10.pkl'
+OUTPUT_DIR = '../M2U200-45-45-10/visualizations'
 OUTPUT_IMAGE = 'Gaussian_Boundary_Full.png'
 LOG_FILE = OUTPUT_IMAGE.replace('.png', '_ConsoleLog.txt')
 
@@ -51,7 +51,7 @@ def load_data():
         if col not in df.columns:
             df[col] = 0
 
-    df_model = df[feature_cols].copy().fillna(0)
+    df_model = df[feature_cols].copy()
 
     if len(df_model) > SAMPLE_SIZE:
         print(f"   Losowanie {SAMPLE_SIZE} wierszy do wizualizacji")
@@ -60,37 +60,59 @@ def load_data():
         y_true = df.loc[indices, 'is_bot']
     else:
         y_true = df['is_bot']
+    
+    num_cols = df_model.select_dtypes(include=[np.number]).columns
+    df_model[num_cols] = df_model[num_cols].fillna(0)
 
     return df_model, y_true
 
-def load_model_and_apply_encoders(X_df):
+def load_model_and_prepare_features(X_df):
     if not os.path.exists(MODEL_FILE):
-        if os.path.exists(os.path.basename(MODEL_FILE)):
-             MODEL_FILE_ACTUAL = os.path.basename(MODEL_FILE)
+        local_name = os.path.basename(MODEL_FILE)
+        if os.path.exists(local_name):
+            model_path = local_name
+        elif os.path.exists(os.path.join('weights', local_name)):
+            model_path = os.path.join('weights', local_name)
         else:
-            print(f"BŁĄD: Brak modelu {MODEL_FILE}. Uruchom najpierw detect_bot_gaussian.py i przenieś model do folderu weights.")
+            print(f"BŁĄD: Brak modelu {MODEL_FILE}. Uruchom najpierw model_RCE.py")
             sys.exit(1)
     else:
-        MODEL_FILE_ACTUAL = MODEL_FILE
+        model_path = MODEL_FILE
 
-    print(f"   Ładowanie z: {MODEL_FILE_ACTUAL}")
-    data_pack = joblib.load(MODEL_FILE_ACTUAL)
-    model = data_pack['model']
-    encoders = data_pack['encoders']
+    print(f"   Ładowanie modelu z: {model_path}")
+    data_pack = joblib.load(model_path)
     
-    for col in ['endpointUrl', 'apiMethod']:
-        le = encoders.get(col)
-        if le:
-            X_df[col] = X_df[col].astype(str).apply(lambda x: le.transform([x])[0] if x in le.classes_ else 0)
-        else:
-            temp_le = LabelEncoder()
-            X_df[col] = temp_le.fit_transform(X_df[col].astype(str))
+    model = data_pack['model']
+
+    if 'url_counts' not in data_pack or 'ohe_encoder' not in data_pack:
+        print("BŁĄD: Plik modelu nie zawiera wymaganych encoderów (url_counts, ohe_encoder).")
+        print(f"Dostępne klucze: {list(data_pack.keys())}")
+        sys.exit(1)
+
+    url_counts = data_pack['url_counts']
+    ohe_encoder = data_pack['ohe_encoder']
+    
+    df_processed = X_df.copy()
+    
+    df_processed['endpointUrl'] = df_processed['endpointUrl'].map(url_counts).fillna(0)
+    
+    encoded_matrix = ohe_encoder.transform(df_processed[['apiMethod']])
+    encoded_cols = ohe_encoder.get_feature_names_out(['apiMethod'])
+    
+    encoded_df = pd.DataFrame(encoded_matrix, columns=encoded_cols, index=df_processed.index)
+    
+    X_final = pd.concat([df_processed.drop(columns=['apiMethod']), encoded_df], axis=1)
+    
+    X_final = X_final.astype(float)
+    
+    print(f"Liczba cech po transformacji: {X_final.shape[1]}")
             
-    return X_df, model
+    return X_final, model
 
 def visualize(X, y_true, model):
 
     y_pred_raw = model.predict(X)
+    
     y_pred = np.where(y_pred_raw == -1, 1, 0)
     
     acc = accuracy_score(y_true, y_pred)
@@ -101,7 +123,7 @@ def visualize(X, y_true, model):
     pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_scaled)
 
-    print(f"\n WYNIKI (Elliptic Envelope / Robust Covariance)")
+    print(f"\nWYNIKI (Elliptic Envelope / RCE)")
     print(f"Dokładność (Accuracy): {acc:.2%}")
     print(f"  TP (Bot poprawnie wykryty): {tp}")
     print(f"  FP (User błędnie zablokowany): {fp}")
@@ -112,11 +134,10 @@ def visualize(X, y_true, model):
     print(f"ANALIZA PCA:")
     print(f"  Wyjaśniona wariancja PC1 (Oś X): {pca.explained_variance_ratio_[0]:.2%}")
     print(f"  Wyjaśniona wariancja PC2 (Oś Y): {pca.explained_variance_ratio_[1]:.2%}")
-    print(f"  RAZEM: {sum(pca.explained_variance_ratio_):.2%} informacji z {X.shape[1]} cech.")
     
     loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=X.columns)
-    print("\nTABELA WPŁYWU CECH NA PCA (Loadings):")
-    print(loadings.sort_values(by='PC1', ascending=False).to_string())
+    print("\nTOP 5 cech wpływających na PC1:")
+    print(loadings.sort_values(by='PC1', ascending=False).head(5).to_string())
 
     boundary_model = KNeighborsClassifier(n_neighbors=15, weights='distance')
     boundary_model.fit(X_pca, y_pred) 
@@ -130,9 +151,8 @@ def visualize(X, y_true, model):
     Z = Z.reshape(xx.shape)
 
     plt.figure(figsize=(12, 10))
-
     plt.contourf(xx, yy, Z, alpha=0.7, cmap=plt.cm.coolwarm)
-
+    
     plt.scatter(X_pca[y_true == 0, 0], X_pca[y_true == 0, 1], 
                 c='blue', label='ACTIVE_USER i CAUTIOUS_USER', s=25, alpha=0.6, edgecolors='w')
     
@@ -146,10 +166,8 @@ def visualize(X, y_true, model):
                     linewidth=2, label='Błędna klasyfikacja')
 
     plt.title(f'Granice decyzyjne Elliptic Envelope (PCA)', fontsize=16)
-    
     plt.xlabel(f'PC 1 ({pca.explained_variance_ratio_[0]:.1%} var)', fontsize=12)
     plt.ylabel(f'PC 2 ({pca.explained_variance_ratio_[1]:.1%} var)', fontsize=12)
-    
     plt.legend(loc='upper right', frameon=True, framealpha=0.9)
     plt.grid(True, alpha=0.3)
     
@@ -167,9 +185,9 @@ if __name__ == "__main__":
 
     try:
         X_raw, y_true = load_data()
-        X_encoded, gaussian_model = load_model_and_apply_encoders(X_raw)
-        visualize(X_encoded, y_true, gaussian_model)
+        X_encoded, model = load_model_and_prepare_features(X_raw)
+        visualize(X_encoded, y_true, model)
     except Exception as e:
-        print(f"\n[CRITICAL ERROR] Wystąpił błąd: {e}")
         import traceback
         traceback.print_exc()
+        print(f"\nKRYTYCZNY BŁĄD: {e}")

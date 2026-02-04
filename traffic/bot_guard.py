@@ -18,7 +18,7 @@ encoders_data = joblib.load("bot_xgboost_encoders_H1U200-45-45-10.pkl")
 url_counts = encoders_data['url_counts']
 ohe_encoder = encoders_data['ohe_encoder']
 
-BOT_THRESHOLD = 0.45
+BOT_THRESHOLD = 0.90
 
 stats_lock = asyncio.Lock()
 seen_users = set()
